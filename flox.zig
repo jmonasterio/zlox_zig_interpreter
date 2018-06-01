@@ -4,6 +4,12 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const debug = std.debug;
 
+const FloxError = error {
+    OutOfRange,
+    //OutOfMemory,
+    //FileNotFound,
+};
+
 const OpCode = enum(u8) {
     OP_RETURN,
 };
@@ -12,11 +18,11 @@ const Chunk = struct {
     //count: u32,
     //capacity: u32,
     //code: &u8,
-    code : ArrayList( u8),
+    code : ArrayList( OpCode),
 
     pub fn initChunk() Chunk {
         return Chunk {
-            .code = ArrayList(u8).init(debug.global_allocator)
+            .code = ArrayList(OpCode).init(debug.global_allocator)
         };
     }
 
@@ -24,10 +30,46 @@ const Chunk = struct {
         l.code.deinit();
     }
 
-    pub fn writeChunk( l:&Chunk, b: u8) !void {
-        return l.code.append( b);
+    pub fn writeChunk( l:&Chunk, opCode: OpCode) !void {
+        return l.code.append( opCode);
     }
     
+    fn simpleInstruction( name: [] const u8, offset: usize) usize {
+        warn("{}\n", name);
+        return offset+1;
+    }
+
+    pub fn disassembleInstruction( self:&Chunk, offset:usize) !usize {
+        warn("{} ", offset);
+
+        if( offset >= self.code.len ) {
+            return error.OutOfRange;    
+        }
+
+        const instruction = self.code.items[offset];
+        switch(instruction) {
+            OpCode.OP_RETURN => return simpleInstruction( "OP_RETURN", offset),
+            else => {
+                warn("Unknown opcode {}\n", instruction);
+                return error.UnknownOpcode;
+                }
+                //return offset++; // <-- TBD: Different from book.
+
+        }
+
+        return offset+1;
+    }
+
+    pub fn disassembleChunk( self:&Chunk, name:[] const u8) !void {
+        warn("== {} ==\n", name);
+
+        var i:usize = 0;
+        while(i<self.code.len)
+        {
+            i = try disassembleInstruction( self, i);
+        }
+    }
+
     
     
 };
@@ -50,8 +92,8 @@ pub fn main() !void {
     //    .code = ArrayList([] const u8).init(debug.global_allocator)
     //};
     assert(ccc.code.len == 0);
-    const item: u8 = 0x1;
-    try ccc.writeChunk( item);
+    try ccc.writeChunk( OpCode.OP_RETURN);
     assert(ccc.code.len == 1);
+    try ccc.disassembleChunk("test chunk");
     warn("Hello, world!\n");
 }
