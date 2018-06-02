@@ -29,24 +29,29 @@ pub fn freeValueArray( va:&ValueArray ) void {
     va.deinit();
 }
 
-const INSTRUCTION = union {
-    OpCode: OP,
-    ValueOffset: usize,
-};
+// Code array holds either opcodes (enum) or value-offsets (offset into valueArray).
+// Tried using union to be more typesafe, but UNIONS can't be passed by value in ZIG.
+// That means array now hold addresses, which is awful (huge).
+//const INSTRUCTION = union {
+//    OpCode: OP,
+//    ValueOffset: usize,
+//};
+
+const INSTRUCTION = usize;
 
 // Code Array support
-const OP = enum(u8) {
+const OP = enum(INSTRUCTION) {
     CONSTANT,
     RETURN,
 };
 
-const CodeArray = ArrayList(&const INSTRUCTION);
+const CodeArray = ArrayList(INSTRUCTION);
 
 pub fn initCodeArray() CodeArray {
-    return ArrayList(&const INSTRUCTION).init(debug.global_allocator);
+    return ArrayList(INSTRUCTION).init(debug.global_allocator);
 }
 
-pub fn writeCodeArray( ca:&CodeArray, opCode:&const INSTRUCTION) !void {
+pub fn writeCodeArray( ca:&CodeArray, opCode:INSTRUCTION) !void {
     try ca.append(opCode);
     return;
 }
@@ -58,7 +63,7 @@ pub fn freeCodeArray( ca:&CodeArray ) void {
 // Chunk support
 
 const Chunk = struct {
-    pub code: ArrayList(& const INSTRUCTION),
+    pub code: ArrayList(INSTRUCTION),
     pub constants: ValueArray
 };
 
@@ -74,7 +79,7 @@ pub fn freeChunk( chunk:& Chunk) void {
     freeValueArray( &chunk.constants);
 }
 
-pub fn writeChunk( chunk:&Chunk, inst: &const INSTRUCTION ) !void {
+pub fn writeChunk( chunk:&Chunk, inst: INSTRUCTION ) !void {
     try writeCodeArray( &chunk.code, inst);
     return;
 }
@@ -97,7 +102,7 @@ fn printValue( value: Value) void {
 }
 
 fn constantInstruction( name: [] const u8, chunk: &Chunk, offset: usize) usize {
-    const valueOffset = (chunk.code.items[offset+1]).ValueOffset;
+    const valueOffset = (usize) (chunk.code.items[offset+1]);
     warn("{} {} '", name, valueOffset);
     printValue( chunk.constants.items[valueOffset]);
     warn( "'\n");
@@ -111,8 +116,8 @@ pub fn disassembleInstruction( chunk:&Chunk, offset:usize) !usize {
         return error.OutOfRange;    
     }
 
-    const instruction = chunk.code.items[offset];
-    switch(instruction.OpCode) {
+    const opCode: OP = (OP) (chunk.code.items[offset]);
+    switch(opCode) {
         OP.RETURN => return simpleInstruction( "OP_RETURN", offset),
         OP.CONSTANT => return constantInstruction( "OP_CONSTANT", chunk, offset),
         else => {
@@ -154,11 +159,11 @@ pub fn main() !void {
     //    .code = ArrayList([] const u8).init(debug.global_allocator)
     //};
     assert(ccc.code.len == 0);
-    try writeChunk( &ccc, &(INSTRUCTION { .OpCode = OP.RETURN}));
+    try writeChunk( &ccc, (INSTRUCTION) (OP.RETURN));
     assert(ccc.code.len == 1);
     const valueOffset = try addConstant(&ccc, 1.2);
-    try writeChunk( &ccc, &(INSTRUCTION { .OpCode = OP.CONSTANT}) );
-    try writeChunk( &ccc, &(INSTRUCTION { .ValueOffset = valueOffset}));
+    try writeChunk( &ccc, (INSTRUCTION) (OP.CONSTANT));
+    try writeChunk( &ccc, (INSTRUCTION) (valueOffset));
     try disassembleChunk( &ccc, "test chunk");
     warn("Hello, world!\n");
 }
