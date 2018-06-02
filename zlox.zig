@@ -17,6 +17,7 @@ const Offset = usize;
 
 // Value Array support
 const Value = f64;
+const LineNumber = u32;
 
 const ValueArray = ArrayList(Value);
 
@@ -46,6 +47,7 @@ const INSTRUCTION = usize;
 // Code Array support
 const OP = enum(INSTRUCTION) {
     CONSTANT,
+    NEGATE,
     RETURN,
 };
 
@@ -68,23 +70,27 @@ pub fn freeCodeArray( ca:&CodeArray ) void {
 
 const Chunk = struct {
     pub code: ArrayList(INSTRUCTION),
-    pub constants: ValueArray
+    pub constants: ValueArray,
+    pub lines: ArrayList(LineNumber),
 };
 
 fn initChunk() Chunk {
     return Chunk {
         .code = initCodeArray(),
-        .constants = initValueArray()
+        .constants = initValueArray(),
+        .lines = ArrayList(LineNumber).init(debug.global_allocator)
     };
 }
  
 pub fn freeChunk( chunk:& Chunk) void {
     freeCodeArray( &chunk.code);
     freeValueArray( &chunk.constants);
+    chunk.lines.deinit();
 }
 
-pub fn writeChunk( chunk:&Chunk, inst: INSTRUCTION ) !void {
+pub fn writeChunk( chunk:&Chunk, inst: INSTRUCTION, line:LineNumber ) !void {
     try writeCodeArray( &chunk.code, inst);
+    try chunk.lines.append(line);
     return;
 }
 
@@ -115,6 +121,11 @@ fn constantInstruction( name: [] const u8, chunk: &Chunk, offset: Offset) Offset
 
 pub fn disassembleInstruction( chunk:&Chunk, offset:Offset) !Offset {
     warn("{} ", offset);
+    if( offset > 0) {
+        warn( "   | ");
+    } else {
+        warn("{} ", chunk.lines.items[offset]);
+    }
 
     if( offset >=chunk.code.len ) {
         return error.OutOfRange;    
@@ -123,6 +134,7 @@ pub fn disassembleInstruction( chunk:&Chunk, offset:Offset) !Offset {
     const opCode: OP = (OP) (chunk.code.items[offset]);
     switch(opCode) {
         OP.RETURN => return simpleInstruction( "OP_RETURN", offset),
+        OP.NEGATE => return simpleInstruction( "OP_NEGATE", offset),
         OP.CONSTANT => return constantInstruction( "OP_CONSTANT", chunk, offset),
         else => {
             warn("Unknown opcode\n"); // {}\n", instruction);
@@ -252,6 +264,9 @@ fn run() !void {
                try push( constant);
                warn("\n");
            },
+           OP.NEGATE => {
+               try push( - pop());
+           },
            else => return InterpretResult.RUNTIME_ERROR,
         }
     }
@@ -277,11 +292,13 @@ pub fn main() !void {
     //};
     assert(chunk.code.len == 0);
     const valueOffset = try addConstant(&chunk, 1.2);
-    try writeChunk( &chunk, (INSTRUCTION) (OP.CONSTANT));
-    try writeChunk( &chunk, (INSTRUCTION) (valueOffset));
+    
+    try writeChunk( &chunk, (INSTRUCTION) (OP.CONSTANT), 123);
+    try writeChunk( &chunk, (INSTRUCTION) (valueOffset), 123);
     assert(chunk.code.len == 2);
-    try writeChunk( &chunk, (INSTRUCTION) (OP.RETURN));
-    assert(chunk.code.len == 3);
+    try writeChunk( &chunk, (INSTRUCTION) (OP.NEGATE), 123);
+    try writeChunk( &chunk, (INSTRUCTION) (OP.RETURN), 123);
+    assert(chunk.code.len == 4);
     try disassembleChunk( &chunk, "test chunk");
     warn("== Interpret\n");
     try interpret( &chunk);
