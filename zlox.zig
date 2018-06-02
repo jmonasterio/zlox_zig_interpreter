@@ -5,11 +5,11 @@ const ArrayList = std.ArrayList;
 const debug = std.debug;
 
 const DEBUG_TRACE_EXECUTION = true;
+const STACK_MAX = 256;
 
 const ZloxError = error {
     OutOfRange,
-    
-    //OutOfMemory,
+    OutOfMemory,
     //FileNotFound,
 };
 
@@ -156,14 +156,23 @@ pub fn disassembleChunk( self:&Chunk, name:[] const u8) !void {
 const VM = struct {
     pub chunk: &Chunk,
     pub ip: Offset,
+    pub stack: [STACK_MAX] Value, // TBD: Could not get slice to work because of CONST
+    pub stackTop: Offset
 };
 
 var vm : VM = undefined;
 
+// Book had this function, but don't really need. Just sorta following along.
+inline fn resetStack() Offset {
+    return 0;
+}
+
 fn initVM() void {
     var chunk = initChunk();
     vm = VM { .chunk = &chunk,
-              .ip = 0, };
+              .ip = 0,
+              .stack = ([]Value{0} ** STACK_MAX), // slice
+              .stackTop = resetStack() };  
 }
 
 fn freeVM() void {
@@ -194,11 +203,39 @@ const InterpretResult = error {
     RUNTIME_ERROR
 };
 
+fn showStack( stackSlice: [] const Value ) void {
+    warn("        ");
+    for (stackSlice) |slot| {
+        warn("[ ");
+        printValue(slot);
+        warn("] ");
+    }
+    warn("\n");
+    return;
+}
+
+fn push( value: Value) !void {
+    vm.stack[vm.stackTop] = value;
+    vm.stackTop +=1;
+
+    if( vm.stackTop > STACK_MAX) {
+        return ZloxError.OutOfMemory;
+    }
+}
+
+fn pop() Value {
+    vm.stackTop -=1;
+
+    return vm.stack[vm.stackTop];
+}
+
 
 fn run() !void {
     while(true) {
 
         if( DEBUG_TRACE_EXECUTION) {
+            showStack( vm.stack[0..vm.stackTop]);    
+
             _ = try disassembleInstruction( vm.chunk, vm.ip);
         }
 
@@ -206,11 +243,13 @@ fn run() !void {
         switch( instruction )
         {
            OP.RETURN => {
+               printValue(pop() );
+               warn("\n");
                return;
            }, 
            OP.CONSTANT => {
                const constant:Value = readConstant();
-               printValue( constant);
+               try push( constant);
                warn("\n");
            },
            else => return InterpretResult.RUNTIME_ERROR,
@@ -224,6 +263,7 @@ fn interpret( chunk: &Chunk) !void {
     try run();
     return;
 }
+
 
 pub fn main() !void {
     initVM();
