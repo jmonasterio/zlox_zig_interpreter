@@ -4,12 +4,16 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const debug = std.debug;
 
-const FloxError = error {
+const DEBUG_TRACE_EXECUTION = true;
+
+const ZloxError = error {
     OutOfRange,
+    
     //OutOfMemory,
     //FileNotFound,
 };
 
+const Offset = usize;
 
 // Value Array support
 const Value = f64;
@@ -86,12 +90,12 @@ pub fn writeChunk( chunk:&Chunk, inst: INSTRUCTION ) !void {
 
 
 // return index into array
-pub fn addConstant( chunk:&Chunk, value:Value ) !usize {
+pub fn addConstant( chunk:&Chunk, value:Value ) !Offset {
     try writeValueArray( &chunk.constants, value);
     return chunk.constants.len -1;
 }
 
-fn simpleInstruction( name: [] const u8, offset: usize) usize {
+fn simpleInstruction( name: [] const u8, offset: Offset) Offset {
     warn("{}\n", name);
     return offset+1;
 }
@@ -101,15 +105,15 @@ fn printValue( value: Value) void {
     return;
 }
 
-fn constantInstruction( name: [] const u8, chunk: &Chunk, offset: usize) usize {
-    const valueOffset = (usize) (chunk.code.items[offset+1]);
+fn constantInstruction( name: [] const u8, chunk: &Chunk, offset: Offset) Offset {
+    const valueOffset = (Offset) (chunk.code.items[offset+1]);
     warn("{} {} '", name, valueOffset);
     printValue( chunk.constants.items[valueOffset]);
     warn( "'\n");
     return offset+2;
 }
 
-pub fn disassembleInstruction( chunk:&Chunk, offset:usize) !usize {
+pub fn disassembleInstruction( chunk:&Chunk, offset:Offset) !Offset {
     warn("{} ", offset);
 
     if( offset >=chunk.code.len ) {
@@ -134,7 +138,7 @@ pub fn disassembleInstruction( chunk:&Chunk, offset:usize) !usize {
 pub fn disassembleChunk( self:&Chunk, name:[] const u8) !void {
     warn("== {} ==\n", name);
 
-    var i:usize = 0;
+    var i:Offset = 0;
     while(i<self.code.len)
     {
         i = try disassembleInstruction( self, i);
@@ -149,21 +153,97 @@ pub fn disassembleChunk( self:&Chunk, name:[] const u8) !void {
 // }
 
 
+const VM = struct {
+    pub chunk: &Chunk,
+    pub ip: Offset,
+};
 
+var vm : VM = undefined;
+
+fn initVM() void {
+    var chunk = initChunk();
+    vm = VM { .chunk = &chunk,
+              .ip = 0, };
+}
+
+fn freeVM() void {
+}
+
+fn readByte() OP {
+    var slice = vm.chunk.code.items[0..];
+    const op = (OP) (slice[vm.ip]);
+    vm.ip += 1;
+    return op;
+}
+
+fn readOffset() Offset { 
+    
+    var slice = vm.chunk.code.items[0..];
+    const offset = slice[vm.ip];
+    vm.ip+=1;
+    return offset;
+}
+
+fn readConstant() Value {
+    const offset = readOffset();
+    return vm.chunk.constants.items[offset];
+}
+
+const InterpretResult = error {
+    COMPILE_ERROR,
+    RUNTIME_ERROR
+};
+
+
+fn run() !void {
+    while(true) {
+
+        if( DEBUG_TRACE_EXECUTION) {
+            _ = try disassembleInstruction( vm.chunk, vm.ip);
+        }
+
+        const instruction = readByte();
+        switch( instruction )
+        {
+           OP.RETURN => {
+               return;
+           }, 
+           OP.CONSTANT => {
+               const constant:Value = readConstant();
+               printValue( constant);
+               warn("\n");
+           },
+           else => return InterpretResult.RUNTIME_ERROR,
+        }
+    }
+}
+
+fn interpret( chunk: &Chunk) !void {
+    vm.chunk = chunk;
+    vm.ip = 0;
+    try run();
+    return;
+}
 
 pub fn main() !void {
-    var ccc = initChunk();
-    defer freeChunk(&ccc);
+    initVM();
+    defer freeVM();
+
+    var chunk = initChunk();
+    defer freeChunk(&chunk);
 
     // {
     //    .code = ArrayList([] const u8).init(debug.global_allocator)
     //};
-    assert(ccc.code.len == 0);
-    try writeChunk( &ccc, (INSTRUCTION) (OP.RETURN));
-    assert(ccc.code.len == 1);
-    const valueOffset = try addConstant(&ccc, 1.2);
-    try writeChunk( &ccc, (INSTRUCTION) (OP.CONSTANT));
-    try writeChunk( &ccc, (INSTRUCTION) (valueOffset));
-    try disassembleChunk( &ccc, "test chunk");
-    warn("Hello, world!\n");
+    assert(chunk.code.len == 0);
+    const valueOffset = try addConstant(&chunk, 1.2);
+    try writeChunk( &chunk, (INSTRUCTION) (OP.CONSTANT));
+    try writeChunk( &chunk, (INSTRUCTION) (valueOffset));
+    assert(chunk.code.len == 2);
+    try writeChunk( &chunk, (INSTRUCTION) (OP.RETURN));
+    assert(chunk.code.len == 3);
+    try disassembleChunk( &chunk, "test chunk");
+    warn("== Interpret\n");
+    try interpret( &chunk);
 }
+
