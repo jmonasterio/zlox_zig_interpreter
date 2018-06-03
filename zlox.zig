@@ -18,7 +18,9 @@ const ZloxError = error {
 };
 
 
-const String = [] u8;
+const Char = u8;
+const String = [] Char;
+const EOF:Char = 0;
 
 const Offset = usize;
 
@@ -398,28 +400,49 @@ inline fn isLastOrEnd(scanner: &Scanner) bool {
     return scanner.current >= scanner.source.len;
 }
 
-fn advance( scanner:&Scanner) u8 {
+fn advance( scanner:&Scanner) Char {
     scanner.current +=1;
     if( isAtEnd( scanner) ) { 
-        return 0;
+        return EOF;
     }
 
     return scanner.source[scanner.current-1];
 }
 
-fn match( scanner:&Scanner, char: u8) bool {
-    if( isLastOrEnd( scanner)) return false; // Book did not have this, because counts on having 0-terminated string.
-    if( scanner.source[scanner.current] != char) return false; // Like a peek.
+inline fn peek( scanner: &Scanner) Char {
+    if( isLastOrEnd( scanner)) { // Book did not have this, because counts on having 0-terminated string.
+        return EOF; 
+    } else {
+        return scanner.source[scanner.current];
+    }
+}
+
+fn match( scanner:&Scanner, char: Char) bool {
+    if( peek(scanner) != char) return false; // Like a peek.
     scanner.current+=1;
     return true;
 }
 
+fn skipWhitespace( scanner: &Scanner) void {
+
+    while( true) {
+        const c = peek( scanner);
+        switch( c) {
+            ' ', '\r', '\t' => _ = advance( scanner),
+            '\n' => {scanner.line +=1; _ = advance(scanner);},
+            else => return
+        }
+    }
+}
+
 fn scanToken( scanner: &Scanner) Token {
+
+    skipWhitespace( scanner);
 
     scanner.start = scanner.current;
 
     const c = advance( scanner);
-    if( c== 0) {
+    if( c== EOF) {
         return eofToken(scanner.line);
     }
     _ = switch(c) {
@@ -438,12 +461,14 @@ fn scanToken( scanner: &Scanner) Token {
         '=' => return makeToken(if( match(scanner,'=')) TokenType.EQUAL_EQUAL else TokenType.EQUAL,scanner),
         '<' => return makeToken(if( match(scanner,'=')) TokenType.LESS_EQUAL else TokenType.LESS,scanner),
         '>' => return makeToken(if( match(scanner,'=')) TokenType.GREATER_EQUAL else TokenType.GREATER,scanner),
-        else => 0
+        else => {
+            var msg = "Unexpected character.";
+            return errorToken( msg[0..], scanner.line);
+            }
     };
 
 
-    var msg = "Unexpected character.";
-    return errorToken( msg[0..], scanner.line);
+    
 }
 
 fn compile( source:String) void {
