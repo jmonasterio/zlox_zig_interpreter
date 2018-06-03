@@ -3,13 +3,17 @@ const assert = @import("std").debug.assert;
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const debug = std.debug;
+const io = std.io;
 
 const DEBUG_TRACE_EXECUTION = true;
 const STACK_MAX = 256;
 
+const ALLOCATOR = debug.global_allocator;
+
 const ZloxError = error {
     OutOfRange,
     OutOfMemory,
+    NotImplemented,
     //FileNotFound,
 };
 
@@ -22,7 +26,7 @@ const LineNumber = u32;
 const ValueArray = ArrayList(Value);
 
 pub fn initValueArray() ValueArray {
-    return ArrayList( Value).init(debug.global_allocator);
+    return ArrayList( Value).init(ALLOCATOR);
 }
 
 pub fn writeValueArray( va:&ValueArray, v:Value ) !void {
@@ -48,13 +52,17 @@ const INSTRUCTION = usize;
 const OP = enum(INSTRUCTION) {
     CONSTANT,
     NEGATE,
+    ADD,
+    SUBTRACT,
+    MULTIPLY,
+    DIVIDE,
     RETURN,
 };
 
 const CodeArray = ArrayList(INSTRUCTION);
 
 pub fn initCodeArray() CodeArray {
-    return ArrayList(INSTRUCTION).init(debug.global_allocator);
+    return ArrayList(INSTRUCTION).init(ALLOCATOR);
 }
 
 pub fn writeCodeArray( ca:&CodeArray, opCode:INSTRUCTION) !void {
@@ -78,7 +86,7 @@ fn initChunk() Chunk {
     return Chunk {
         .code = initCodeArray(),
         .constants = initValueArray(),
-        .lines = ArrayList(LineNumber).init(debug.global_allocator)
+        .lines = ArrayList(LineNumber).init(ALLOCATOR)
     };
 }
  
@@ -135,6 +143,10 @@ pub fn disassembleInstruction( chunk:&Chunk, offset:Offset) !Offset {
     switch(opCode) {
         OP.RETURN => return simpleInstruction( "OP_RETURN", offset),
         OP.NEGATE => return simpleInstruction( "OP_NEGATE", offset),
+        OP.ADD => return simpleInstruction( "OP_ADD", offset),
+        OP.SUBTRACT => return simpleInstruction( "OP_SUBTRACT", offset),
+        OP.DIVIDE => return simpleInstruction( "OP_DIVIDE", offset),
+        OP.MULTIPLY => return simpleInstruction( "OP_MULTIPLY", offset),
         OP.CONSTANT => return constantInstruction( "OP_CONSTANT", chunk, offset),
         else => {
             warn("Unknown opcode\n"); // {}\n", instruction);
@@ -241,6 +253,25 @@ fn pop() Value {
     return vm.stack[vm.stackTop];
 }
 
+fn add( a:Value, b:Value) Value {
+    return a+b;
+}
+
+// Zig macro is partially executed at runtime. Will assert if you pass an illegal OP as constnat
+fn BINARY_OP( comptime op: OP) !void {
+    const b = pop();
+    const a = pop();
+
+    const result = switch( op){
+        OP.ADD => a+b,
+        OP.SUBTRACT => a-b,
+        OP.MULTIPLY => b*a,
+        OP.DIVIDE => a/b,
+        else => { comptime assert( false); }, //"Not supported"),
+    };
+
+    try push( result );
+}
 
 fn run() !void {
     while(true) {
@@ -259,6 +290,10 @@ fn run() !void {
                warn("\n");
                return;
            }, 
+           OP.ADD => { try BINARY_OP(OP.ADD); },
+           OP.SUBTRACT => { try BINARY_OP(OP.SUBTRACT); },
+           OP.MULTIPLY => { try BINARY_OP(OP.MULTIPLY); },
+           OP.DIVIDE => { try BINARY_OP(OP.DIVIDE); },
            OP.CONSTANT => {
                const constant:Value = readConstant();
                try push( constant);
@@ -279,26 +314,73 @@ fn interpret( chunk: &Chunk) !void {
     return;
 }
 
+fn repl() !void {
+    //const buf : [] u8 {0} ** 1024;
+    //const len = try io.readLine( buf);
+    return ZloxError.NotImplemented;
+}
 
-pub fn main() !void {
+fn runFile( file: []u8 ) void {
+    while(true) {
+        warn( "> ");
+        const line = try std.os.readLine( ALLOCATOR) ?? break;
+        printfn("\n");
+        interpret(line);
+    }
+}
+
+pub fn main( ) !void {
     initVM();
     defer freeVM();
+
+    const it: &std.os.ArgIteratorWindows = &std.os.ArgIteratorWindows.init();
+    var argv = ArrayList([]u8).init(ALLOCATOR);
+    defer argv.deinit();
+    while( true) {
+        const next = try it.next( ALLOCATOR) ?? break;
+        try argv.append(next);
+    }
+
+    const argc = argv.len;
+    if( argc == 1) {
+        try repl();
+    } else if( argc == 2) {
+        const file = argv.items[1]; // Skip EXE name which is 0th item.
+        //defer file.deinit();
+        runFile( file);
+    } else
+    {
+        warn( "Usage zlox [path]\n");
+        // TBD: exit();
+    }
 
     var chunk = initChunk();
     defer freeChunk(&chunk);
 
     // {
-    //    .code = ArrayList([] const u8).init(debug.global_allocator)
+    //    .code = ArrayList([] const u8).init(ALLOCATOR)
     //};
     assert(chunk.code.len == 0);
-    const valueOffset = try addConstant(&chunk, 1.2);
+    var valueOffset = try addConstant(&chunk, 1.2);
     
     try writeChunk( &chunk, (INSTRUCTION) (OP.CONSTANT), 123);
     try writeChunk( &chunk, (INSTRUCTION) (valueOffset), 123);
     assert(chunk.code.len == 2);
+
+    valueOffset = try addConstant(&chunk, 3.4);
+    try writeChunk(&chunk, (INSTRUCTION) (OP.CONSTANT), 123);
+    try writeChunk(&chunk, (INSTRUCTION) (valueOffset), 123);
+
+    try writeChunk(&chunk, (INSTRUCTION) (OP.ADD), 123);
+
+    valueOffset = try addConstant(&chunk, 5.6);
+    try writeChunk(&chunk, (INSTRUCTION) (OP.CONSTANT), 123);
+    try writeChunk(&chunk, (INSTRUCTION) (valueOffset), 123);
+
+    try writeChunk(&chunk, (INSTRUCTION) (OP.DIVIDE), 123);
+
     try writeChunk( &chunk, (INSTRUCTION) (OP.NEGATE), 123);
     try writeChunk( &chunk, (INSTRUCTION) (OP.RETURN), 123);
-    assert(chunk.code.len == 4);
     try disassembleChunk( &chunk, "test chunk");
     warn("== Interpret\n");
     try interpret( &chunk);
