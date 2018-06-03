@@ -361,10 +361,21 @@ const Token = struct {
     line: LineNumber,
 };
 
-fn makeToken( ttype: TokenType, lexemeSlice: String, line:LineNumber) Token {
+fn makeToken( ttype: TokenType, scanner:&Scanner) Token {
+    var lexemeSlice = scanner.source[scanner.start..scanner.current];
     return Token{
         .ttype = ttype,
-        .start = &lexemeSlice[0..],
+        .start = &lexemeSlice,
+        .line = scanner.line,
+
+    };
+}
+
+fn eofToken( line:LineNumber) Token {
+    var eof = "EOF";
+    return Token{
+        .ttype = TokenType.EOF,
+        .start = &eof[0..],
         .line = line,
 
     };
@@ -383,6 +394,10 @@ inline fn isAtEnd(scanner: &Scanner) bool {
     return scanner.current > scanner.source.len;
 }
 
+inline fn isLastOrEnd(scanner: &Scanner) bool {
+    return scanner.current >= scanner.source.len;
+}
+
 fn advance( scanner:&Scanner) u8 {
     scanner.current +=1;
     if( isAtEnd( scanner) ) { 
@@ -392,7 +407,12 @@ fn advance( scanner:&Scanner) u8 {
     return scanner.source[scanner.current-1];
 }
 
-
+fn match( scanner:&Scanner, char: u8) bool {
+    if( isLastOrEnd( scanner)) return false; // Book did not have this, because counts on having 0-terminated string.
+    if( scanner.source[scanner.current] != char) return false; // Like a peek.
+    scanner.current+=1;
+    return true;
+}
 
 fn scanToken( scanner: &Scanner) Token {
 
@@ -400,21 +420,24 @@ fn scanToken( scanner: &Scanner) Token {
 
     const c = advance( scanner);
     if( c== 0) {
-        return makeToken( TokenType.EOF, "", scanner.line);
+        return eofToken(scanner.line);
     }
-    var lexeme = scanner.source[scanner.start..scanner.start+1];
     _ = switch(c) {
-        '(' => return makeToken(TokenType.LEFT_PAREN,lexeme,scanner.line),
-        ')' => return makeToken(TokenType.RIGHT_PAREN,lexeme,scanner.line),
-        '{' => return makeToken(TokenType.LEFT_BRACE,lexeme,scanner.line),
-        '}' => return makeToken(TokenType.RIGHT_BRACE,lexeme,scanner.line),
-        ';' => return makeToken(TokenType.SEMICOLON,lexeme,scanner.line),
-        ',' => return makeToken(TokenType.COMMA,lexeme,scanner.line),
-        '.' => return makeToken(TokenType.DOT,lexeme,scanner.line),
-        '-' => return makeToken(TokenType.MINUS,lexeme,scanner.line),
-        '+' => return makeToken(TokenType.PLUS,lexeme,scanner.line),
-        '/' => return makeToken(TokenType.SLASH,lexeme,scanner.line),
-        '*' => return makeToken(TokenType.STAR,lexeme,scanner.line),
+        '(' => return makeToken(TokenType.LEFT_PAREN,scanner),
+        ')' => return makeToken(TokenType.RIGHT_PAREN,scanner),
+        '{' => return makeToken(TokenType.LEFT_BRACE,scanner),
+        '}' => return makeToken(TokenType.RIGHT_BRACE,scanner),
+        ';' => return makeToken(TokenType.SEMICOLON,scanner),
+        ',' => return makeToken(TokenType.COMMA,scanner),
+        '.' => return makeToken(TokenType.DOT,scanner),
+        '-' => return makeToken(TokenType.MINUS,scanner),
+        '+' => return makeToken(TokenType.PLUS,scanner),
+        '/' => return makeToken(TokenType.SLASH,scanner),
+        '*' => return makeToken(TokenType.STAR,scanner),
+        '!' => return makeToken(if( match(scanner,'=')) TokenType.BANG_EQUAL else TokenType.BANG,scanner),
+        '=' => return makeToken(if( match(scanner,'=')) TokenType.EQUAL_EQUAL else TokenType.EQUAL,scanner),
+        '<' => return makeToken(if( match(scanner,'=')) TokenType.LESS_EQUAL else TokenType.LESS,scanner),
+        '>' => return makeToken(if( match(scanner,'=')) TokenType.GREATER_EQUAL else TokenType.GREATER,scanner),
         else => 0
     };
 
