@@ -17,6 +17,9 @@ const ZloxError = error {
     //FileNotFound,
 };
 
+
+const String = [] u8;
+
 const Offset = usize;
 
 // Value Array support
@@ -307,6 +310,113 @@ fn run() !void {
     }
 }
 
+const Scanner = struct {
+    source: String,
+    start: Offset,
+    current: Offset,
+    line: LineNumber,
+};
+
+fn initScanner( source:String) Scanner {
+    return Scanner{
+        .source = source,
+        .start = 0,
+        .current = 0,
+        .line = 1,
+    };
+}
+
+const TokenType = enum {
+    // Single-character tokens.
+  LEFT_PAREN, RIGHT_PAREN,
+  LEFT_BRACE, RIGHT_BRACE,
+  COMMA, DOT, MINUS, PLUS,
+  SEMICOLON, SLASH, STAR,
+
+  // One or two character tokens.
+  BANG, BANG_EQUAL,
+  EQUAL, EQUAL_EQUAL,
+  GREATER, GREATER_EQUAL,
+  LESS, LESS_EQUAL,
+
+  // Literals.
+  IDENTIFIER, STRING, NUMBER,
+
+  // Keywords.
+  AND, CLASS, ELSE, FALSE,
+  FUN, FOR, IF, NIL, OR,
+  PRINT, RETURN, SUPER, THIS,
+  TRUE, VAR, WHILE,
+
+  ERROR,
+  EOF
+};
+
+const Token = struct {
+    ttype: TokenType,
+    start: &[]u8, // TBD: Slice from original source.
+    //length: usize;
+    line: LineNumber,
+};
+
+fn isAtEnd(scanner: &Scanner) bool {
+    return scanner.current == 0;
+}
+
+fn makeToken( ttype: TokenType, lexemeSlice: String, line:LineNumber) Token {
+    return Token{
+        .ttype = ttype,
+        .start = &lexemeSlice[0..],
+        .line = line,
+
+    };
+}
+
+fn errorToken( message: String, line:LineNumber) Token {
+    return Token{
+        .ttype = TokenType.ERROR,
+        .start = &message[0..],
+        .line = line,
+
+    };
+}
+
+fn scanToken( scanner: &Scanner) Token {
+
+    scanner.start = scanner.current;
+    if( isAtEnd( scanner) ) {
+        return makeToken( TokenType.EOF, "", scanner.line);
+    }
+    var msg = "Unexpected character.";
+    return errorToken( msg[0..], scanner.line);
+}
+
+fn compile( source:String) void {
+    var scanner = initScanner( source);
+
+    var line:LineNumber = 0;
+    while(true) {
+        const token =scanToken(&scanner );
+        if( token.line != line) {
+            warn( "{} ", token.line);
+            line = token.line;
+        } else {
+            warn( "   | ");
+        }
+        warn("{} {} \n", (u6) (token.ttype), token.start);
+
+        if( token.ttype == TokenType.EOF) break;
+
+    }
+
+    return;
+}
+
+fn interpretSource( source:String) void {
+    compile( source);
+    return;
+}
+
 fn interpret( chunk: &Chunk) !void {
     vm.chunk = chunk;
     vm.ip = 0;
@@ -314,19 +424,46 @@ fn interpret( chunk: &Chunk) !void {
     return;
 }
 
-fn repl() !void {
-    //const buf : [] u8 {0} ** 1024;
-    //const len = try io.readLine( buf);
-    return ZloxError.NotImplemented;
+const LINE_LEN = 1000;
+
+pub fn readLine(buf: String) !usize {
+    var stdin = io.getStdIn() catch return error.StdInUnavailable;
+    var adapter = io.FileInStream.init(&stdin);
+    var stream = &adapter.stream;
+    var index: usize = 0;
+    while (true) {
+        const byte = stream.readByte() catch return error.EndOfFile;
+        switch (byte) {
+            '\r' => {
+                // trash the following \n
+                _ = stream.readByte() catch return error.EndOfFile;
+                return index;
+            },
+            '\n' => return index,
+            else => {
+                if (index == LINE_LEN) return error.InputTooLong;
+                buf[index] = byte;
+                index += 1;
+            },
+        }
+    }
 }
 
-fn runFile( file: []u8 ) void {
+fn repl() !void {
     while(true) {
         warn( "> ");
-        const line = try std.os.readLine( ALLOCATOR) ?? break;
-        printfn("\n");
-        interpret(line);
+        var line = String {0} ** LINE_LEN;
+        const len = try readLine( line[0..]);
+        warn("\n");
+
+        interpretSource(line[0..]);
     }
+}
+
+fn runFile( path: String ) !void {
+    const source = try std.io.readFileAlloc(ALLOCATOR, path);
+    interpretSource( source);
+    return;
 }
 
 pub fn main( ) !void {
@@ -334,7 +471,7 @@ pub fn main( ) !void {
     defer freeVM();
 
     const it: &std.os.ArgIteratorWindows = &std.os.ArgIteratorWindows.init();
-    var argv = ArrayList([]u8).init(ALLOCATOR);
+    var argv = ArrayList(String).init(ALLOCATOR);
     defer argv.deinit();
     while( true) {
         const next = try it.next( ALLOCATOR) ?? break;
@@ -347,7 +484,7 @@ pub fn main( ) !void {
     } else if( argc == 2) {
         const file = argv.items[1]; // Skip EXE name which is 0th item.
         //defer file.deinit();
-        runFile( file);
+        try runFile( file);
     } else
     {
         warn( "Usage zlox [path]\n");
