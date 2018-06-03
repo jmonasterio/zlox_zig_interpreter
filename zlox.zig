@@ -313,6 +313,7 @@ fn run() !void {
 const Scanner = struct {
     source: String,
     start: Offset,
+    len: usize,
     current: Offset,
     line: LineNumber,
 };
@@ -321,6 +322,7 @@ fn initScanner( source:String) Scanner {
     return Scanner{
         .source = source,
         .start = 0,
+        .len = 0,
         .current = 0,
         .line = 1,
     };
@@ -359,10 +361,6 @@ const Token = struct {
     line: LineNumber,
 };
 
-fn isAtEnd(scanner: &Scanner) bool {
-    return scanner.current == 0;
-}
-
 fn makeToken( ttype: TokenType, lexemeSlice: String, line:LineNumber) Token {
     return Token{
         .ttype = ttype,
@@ -381,12 +379,46 @@ fn errorToken( message: String, line:LineNumber) Token {
     };
 }
 
+inline fn isAtEnd(scanner: &Scanner) bool {
+    return scanner.current > scanner.source.len;
+}
+
+fn advance( scanner:&Scanner) u8 {
+    scanner.current +=1;
+    if( isAtEnd( scanner) ) { 
+        return 0;
+    }
+
+    return scanner.source[scanner.current-1];
+}
+
+
+
 fn scanToken( scanner: &Scanner) Token {
 
     scanner.start = scanner.current;
-    if( isAtEnd( scanner) ) {
+
+    const c = advance( scanner);
+    if( c== 0) {
         return makeToken( TokenType.EOF, "", scanner.line);
     }
+    var lexeme = scanner.source[scanner.start..scanner.start+1];
+    _ = switch(c) {
+        '(' => return makeToken(TokenType.LEFT_PAREN,lexeme,scanner.line),
+        ')' => return makeToken(TokenType.RIGHT_PAREN,lexeme,scanner.line),
+        '{' => return makeToken(TokenType.LEFT_BRACE,lexeme,scanner.line),
+        '}' => return makeToken(TokenType.RIGHT_BRACE,lexeme,scanner.line),
+        ';' => return makeToken(TokenType.SEMICOLON,lexeme,scanner.line),
+        ',' => return makeToken(TokenType.COMMA,lexeme,scanner.line),
+        '.' => return makeToken(TokenType.DOT,lexeme,scanner.line),
+        '-' => return makeToken(TokenType.MINUS,lexeme,scanner.line),
+        '+' => return makeToken(TokenType.PLUS,lexeme,scanner.line),
+        '/' => return makeToken(TokenType.SLASH,lexeme,scanner.line),
+        '*' => return makeToken(TokenType.STAR,lexeme,scanner.line),
+        else => 0
+    };
+
+
     var msg = "Unexpected character.";
     return errorToken( msg[0..], scanner.line);
 }
@@ -456,7 +488,7 @@ fn repl() !void {
         const len = try readLine( line[0..]);
         warn("\n");
 
-        interpretSource(line[0..]);
+        interpretSource(line[0..len]);
     }
 }
 
