@@ -530,6 +530,58 @@ fn isDigit( c:Char) bool {
     return c >= '0' and c <= '9';
 }
 
+fn isAlpha( c:Char) bool {
+    return (c >= 'a' and c <= 'z') or ( c>='A' and c <= 'Z') or ( c=='_');
+}
+
+fn areEqualStrings( a:[] const u8, b:[] const u8) bool {
+    if( a.len != b.len) { return false;}
+    var offset:usize = a.len-1;
+    while( offset > 0) {
+        if( a[offset] != b[offset]) {
+            return false;
+        }
+        offset-=1;
+    }
+    return true;
+     
+}
+
+fn checkKeyword( scanner:&Scanner, start: Offset, length:usize, rest:[] const u8, tokenType:TOKEN) TOKEN {
+    if( (scanner.current - scanner.start == start + length) and
+        ( areEqualStrings( rest,scanner.source[scanner.start+start..scanner.start+start+length])) ) {
+            return tokenType;
+        }
+    return TOKEN.IDENTIFIER;
+}
+
+fn identifierType( scanner: &Scanner) TOKEN {
+
+    switch( scanner.source[scanner.start]) {
+        'a'=> return checkKeyword(scanner, 1,2,"nd", TOKEN.AND),   // TBD: The "2" is always the len of "rest"
+        'c'=> return checkKeyword(scanner, 1,4,"lass", TOKEN.CLASS),
+        'e'=> return checkKeyword(scanner, 1,3,"lse", TOKEN.ELSE),
+        'f'=> if( scanner.current-scanner.start > 1) {
+                switch( scanner.source[scanner.start+1]) {
+                    'a' => return checkKeyword(scanner,2,3,"lse", TOKEN.FALSE),
+                    'o' => return checkKeyword(scanner,2,1,"r", TOKEN.FOR),
+                    'u' => return checkKeyword(scanner,2,1,"n", TOKEN.FUN),
+                    else => return TOKEN.IDENTIFIER,
+                    }
+                } 
+                else return TOKEN.IDENTIFIER,
+        'i'=> return checkKeyword(scanner, 1,1,"f", TOKEN.IF),
+        'n'=> return checkKeyword(scanner, 1,2,"il", TOKEN.NIL),
+        'o'=> return checkKeyword(scanner, 1,1,"r", TOKEN.OR),
+        'p'=> return checkKeyword(scanner, 1,4,"rint", TOKEN.PRINT),
+        'r'=> return checkKeyword(scanner, 1,5,"eturn", TOKEN.RETURN),
+        's'=> return checkKeyword(scanner, 1,4,"uper", TOKEN.SUPER),
+        'v'=> return checkKeyword(scanner, 1,2,"ar", TOKEN.VAR),
+        'w'=> return checkKeyword(scanner, 1,4,"hile", TOKEN.WHILE),
+        else => return TOKEN.IDENTIFIER
+    }
+}
+
 fn number( scanner:&Scanner) Token {
     while( isDigit( peek(scanner))) { 
         advanceIgnore( scanner);
@@ -542,6 +594,13 @@ fn number( scanner:&Scanner) Token {
     }
     return makeToken( TOKEN.NUMBER, scanner);
 
+}
+
+fn identifier( scanner:&Scanner) Token {
+    while( isAlpha( peek(scanner))) {
+        advanceIgnore(scanner);
+    }
+    return makeToken( identifierType(scanner), scanner);
 }
 
 fn scanToken( scanner: &Scanner) Token {
@@ -572,6 +631,7 @@ fn scanToken( scanner: &Scanner) Token {
         '>' => return makeToken(if( match(scanner,'=')) TOKEN.GREATER_EQUAL else TOKEN.GREATER,scanner),
         '"' => return string(scanner),
         '0'...'9' => return number(scanner),
+        'a'...'z','A'...'Z','_' => return identifier(scanner),
         else => {
             var msg = "Unexpected character.";
             return errorToken( msg[0..], scanner.line);
