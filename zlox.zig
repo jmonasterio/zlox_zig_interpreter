@@ -42,7 +42,7 @@ const STACK_MAX = 256;
 
 const ALLOCATOR = debug.global_allocator;
 
-//const SLICEU8 = &const[]u8;
+const SLICEU8 = &const[]u8;
 
 const ZloxError = error {
     OutOfRange,
@@ -406,7 +406,7 @@ const Token = struct {
     start: Offset, // TBD: Slice from original source.
     end: Offset,
     line: LineNumber,
-    message: string,
+    message: String,
 };
 
 fn makeToken( tokenType: TOKEN, scanner:&Scanner) Token {
@@ -420,10 +420,9 @@ fn makeToken( tokenType: TOKEN, scanner:&Scanner) Token {
 }
 
 fn eofToken( line:LineNumber) Token {
-    var eof = "EOF";
     return Token{
         .tokenType = TOKEN.EOF,
-        .message = eof,
+        .message = "",
         .line = line,
         .start = 0,
         .end = 0,
