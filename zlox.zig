@@ -1,9 +1,41 @@
-const warn = @import("std").debug.warn;
-const assert = @import("std").debug.assert;
+// Clox Interpreter ported from CraftingInterpreters.com to ZigLang
+
+// Pros and cons of ZIG.
+
+// Pros
+// Compile/link seems really quick.
+// Idea of printf("%A dog), being split into seperate code at runtime is cool.
+// Comptime stuff is cool: See BINARY_OP instead of original macro in c.
+// Error returns are cool.
+// C-like.
+
+// Cons
+// No easy echo.
+// Can't print strings reliably.
+// Const propogation
+// Error return propogation
+// Too much keyword overloading (like const)
+// No multiline comments.
+// Can't debug inline
+// Can't infer type of return value for function.
+// I Haven't figured out anything but the debug.global_allocator
+// UTF-8/Strings support very limited.
+// No pointer math.
+// STD library is a shambles.
+// For loop over indexes not clear. How do I do: (for int=1; i<10; i++) {}?
+// Commas vs Semicolons. Often confused about what needs a semicolon..
+// I started out using "classes" (structs with functions), but soon abandoned. Not sure why.
+// No printf formatting (like %4.4d)
+// Enums (and small structs) can't be passed by value.
+
+
 const std = @import("std");
+const warn = std.debug.warn;
+const assert = std.debug.assert;
 const ArrayList = std.ArrayList;
 const debug = std.debug;
 const io = std.io;
+const fmt = std.fmt;
 
 const DEBUG_TRACE_EXECUTION = true;
 const STACK_MAX = 256;
@@ -16,6 +48,20 @@ const ZloxError = error {
     NotImplemented,
     //FileNotFound,
 };
+
+inline fn printValue( value: var) !void {
+   var buf: [100]u8 = undefined;
+   var result = ([] const u8) (try fmt.bufPrint(buf[0..], "{}", value));
+   //warn(result);
+   return;
+}
+
+inline fn printFormattedValue( format: []u8, value: var) !void {
+   var buf: [100]u8 = undefined;
+   const result = try bufPrint(buf[0..], format, value);
+   warn(result);
+   return;
+}
 
 
 const Char = u8;
@@ -91,7 +137,7 @@ fn initChunk() Chunk {
     return Chunk {
         .code = initCodeArray(),
         .constants = initValueArray(),
-        .lines = ArrayList(LineNumber).init(ALLOCATOR)
+        .lines = ArrayList(LineNumber).init(ALLOCATOR) // TBD: SHould wrap like above.
     };
 }
  
@@ -115,19 +161,15 @@ pub fn addConstant( chunk:&Chunk, value:Value ) !Offset {
 }
 
 fn simpleInstruction( name: [] const u8, offset: Offset) Offset {
-    warn("{}\n", name);
+    warn("{} {}", name, offset);
+    warn("\n");
     return offset+1;
 }
 
-fn printValue( value: Value) void {
-    warn("{}", value);
-    return;
-}
-
-fn constantInstruction( name: [] const u8, chunk: &Chunk, offset: Offset) Offset {
+fn constantInstruction( name: [] const u8, chunk: &Chunk, offset: Offset) !Offset {
     const valueOffset = (Offset) (chunk.code.items[offset+1]);
     warn("{} {} '", name, valueOffset);
-    printValue( chunk.constants.items[valueOffset]);
+    try printValue( chunk.constants.items[valueOffset]);
     warn( "'\n");
     return offset+2;
 }
@@ -232,11 +274,11 @@ const InterpretResult = error {
     RUNTIME_ERROR
 };
 
-fn showStack( stackSlice: [] const Value ) void {
+fn showStack( stackSlice: [] const Value ) !void {
     warn("        ");
     for (stackSlice) |slot| {
         warn("[ ");
-        printValue(slot);
+        try printValue(slot);
         warn("] ");
     }
     warn("\n");
@@ -263,10 +305,11 @@ fn add( a:Value, b:Value) Value {
 }
 
 // Zig macro is partially executed at runtime. Will assert if you pass an illegal OP as constnat
-fn BINARY_OP( comptime op: OP) !void {
+inline fn BINARY_OP( comptime op: OP) !void {
     const b = pop();
     const a = pop();
 
+    // This switch happens at compile time. Only one case in resulting generated code.
     const result = switch( op){
         OP.ADD => a+b,
         OP.SUBTRACT => a-b,
@@ -282,7 +325,7 @@ fn run() !void {
     while(true) {
 
         if( DEBUG_TRACE_EXECUTION) {
-            showStack( vm.stack[0..vm.stackTop]);    
+            try showStack( vm.stack[0..vm.stackTop]);    
 
             _ = try disassembleInstruction( vm.chunk, vm.ip);
         }
@@ -291,7 +334,7 @@ fn run() !void {
         switch( instruction )
         {
            OP.RETURN => {
-               printValue(pop() );
+               try printValue( pop() );
                warn("\n");
                return;
            }, 
@@ -330,7 +373,7 @@ fn initScanner( source:String) Scanner {
     };
 }
 
-const TokenType = enum {
+const TOKEN = enum {
     // Single-character tokens.
   LEFT_PAREN, RIGHT_PAREN,
   LEFT_BRACE, RIGHT_BRACE,
@@ -357,16 +400,16 @@ const TokenType = enum {
 };
 
 const Token = struct {
-    ttype: TokenType,
+    tokenType: TOKEN,
     start: &[]u8, // TBD: Slice from original source.
     //length: usize;
     line: LineNumber,
 };
 
-fn makeToken( ttype: TokenType, scanner:&Scanner) Token {
+fn makeToken( tokenType: TOKEN, scanner:&Scanner) Token {
     var lexemeSlice = scanner.source[scanner.start..scanner.current];
     return Token{
-        .ttype = ttype,
+        .tokenType = tokenType,
         .start = &lexemeSlice,
         .line = scanner.line,
 
@@ -376,7 +419,7 @@ fn makeToken( ttype: TokenType, scanner:&Scanner) Token {
 fn eofToken( line:LineNumber) Token {
     var eof = "EOF";
     return Token{
-        .ttype = TokenType.EOF,
+        .tokenType = TOKEN.EOF,
         .start = &eof[0..],
         .line = line,
 
@@ -385,7 +428,7 @@ fn eofToken( line:LineNumber) Token {
 
 fn errorToken( message: String, line:LineNumber) Token {
     return Token{
-        .ttype = TokenType.ERROR,
+        .tokenType = TOKEN.ERROR,
         .start = &message[0..],
         .line = line,
 
@@ -400,12 +443,16 @@ inline fn isLastOrEnd(scanner: &Scanner) bool {
     return scanner.current >= scanner.source.len;
 }
 
+inline fn isSecondLastOrEnd(scanner: &Scanner) bool {
+    return scanner.current >= scanner.source.len-1;
+}
+
+
 fn advance( scanner:&Scanner) Char {
     scanner.current +=1;
     if( isAtEnd( scanner) ) { 
         return EOF;
     }
-
     return scanner.source[scanner.current-1];
 }
 
@@ -417,22 +464,79 @@ inline fn peek( scanner: &Scanner) Char {
     }
 }
 
+inline fn peekNext( scanner: &Scanner) Char {
+    if( isSecondLastOrEnd( scanner)) { // Book did not have this, because counts on having 0-terminated string.
+        return EOF; 
+    } else {
+        return scanner.source[scanner.current+1];
+    }
+}
+
 fn match( scanner:&Scanner, char: Char) bool {
     if( peek(scanner) != char) return false; // Like a peek.
     scanner.current+=1;
     return true;
 }
 
+inline fn skipComment( scanner: &Scanner) void {
+    while(true) {
+        const ch:Char = peek( scanner);
+        switch( ch) {
+            '\n', EOF => break,
+            else => advanceIgnore( scanner),
+        }
+    }
+}
+
 fn skipWhitespace( scanner: &Scanner) void {
 
     while( true) {
-        const c = peek( scanner);
+        const c:Char = peek( scanner);
         switch( c) {
-            ' ', '\r', '\t' => _ = advance( scanner),
-            '\n' => {scanner.line +=1; _ = advance(scanner);},
+            ' ', '\r', '\t' => advanceIgnore( scanner),
+            '\n' => {scanner.line +=1; _ = advanceIgnore(scanner);},
+            '/' => {if( peekNext(scanner)=='/') {skipComment(scanner );} return;},
             else => return
         }
     }
+}
+
+fn string( scanner:&Scanner) Token {
+    while( peek( scanner) != '"' ) {
+        if( peek(scanner) == '\n') {
+            scanner.line+=1;
+        }
+        advanceIgnore(scanner); // TBD: _ = advance() kinda sucks. Return value always ignored but one place.
+    }
+    if( isAtEnd(scanner)) {
+        var msg = "Unterminated string";
+        return errorToken( msg[0..], scanner.line);
+    }
+    advanceIgnore( scanner);
+    return makeToken( TOKEN.STRING, scanner);
+}
+
+inline fn advanceIgnore( scanner: &Scanner) void {
+    _ = advance( scanner);
+    return;
+} 
+
+fn isDigit( c:Char) bool {
+    return c >= '0' and c <= '9';
+}
+
+fn number( scanner:&Scanner) Token {
+    while( isDigit( peek(scanner))) { 
+        advanceIgnore( scanner);
+    }
+    if( peek(scanner) == '.' and isDigit(peekNext(scanner))) {
+        advanceIgnore(scanner);
+        while( isDigit( peek(scanner))) {
+            advanceIgnore(scanner);
+        }
+    }
+    return makeToken( TOKEN.NUMBER, scanner);
+
 }
 
 fn scanToken( scanner: &Scanner) Token {
@@ -446,21 +550,23 @@ fn scanToken( scanner: &Scanner) Token {
         return eofToken(scanner.line);
     }
     _ = switch(c) {
-        '(' => return makeToken(TokenType.LEFT_PAREN,scanner),
-        ')' => return makeToken(TokenType.RIGHT_PAREN,scanner),
-        '{' => return makeToken(TokenType.LEFT_BRACE,scanner),
-        '}' => return makeToken(TokenType.RIGHT_BRACE,scanner),
-        ';' => return makeToken(TokenType.SEMICOLON,scanner),
-        ',' => return makeToken(TokenType.COMMA,scanner),
-        '.' => return makeToken(TokenType.DOT,scanner),
-        '-' => return makeToken(TokenType.MINUS,scanner),
-        '+' => return makeToken(TokenType.PLUS,scanner),
-        '/' => return makeToken(TokenType.SLASH,scanner),
-        '*' => return makeToken(TokenType.STAR,scanner),
-        '!' => return makeToken(if( match(scanner,'=')) TokenType.BANG_EQUAL else TokenType.BANG,scanner),
-        '=' => return makeToken(if( match(scanner,'=')) TokenType.EQUAL_EQUAL else TokenType.EQUAL,scanner),
-        '<' => return makeToken(if( match(scanner,'=')) TokenType.LESS_EQUAL else TokenType.LESS,scanner),
-        '>' => return makeToken(if( match(scanner,'=')) TokenType.GREATER_EQUAL else TokenType.GREATER,scanner),
+        '(' => return makeToken(TOKEN.LEFT_PAREN,scanner),
+        ')' => return makeToken(TOKEN.RIGHT_PAREN,scanner),
+        '{' => return makeToken(TOKEN.LEFT_BRACE,scanner),
+        '}' => return makeToken(TOKEN.RIGHT_BRACE,scanner),
+        ';' => return makeToken(TOKEN.SEMICOLON,scanner),
+        ',' => return makeToken(TOKEN.COMMA,scanner),
+        '.' => return makeToken(TOKEN.DOT,scanner),
+        '-' => return makeToken(TOKEN.MINUS,scanner),
+        '+' => return makeToken(TOKEN.PLUS,scanner),
+        '/' => return makeToken(TOKEN.SLASH,scanner),
+        '*' => return makeToken(TOKEN.STAR,scanner),
+        '!' => return makeToken(if( match(scanner,'=')) TOKEN.BANG_EQUAL else TOKEN.BANG,scanner),
+        '=' => return makeToken(if( match(scanner,'=')) TOKEN.EQUAL_EQUAL else TOKEN.EQUAL,scanner),
+        '<' => return makeToken(if( match(scanner,'=')) TOKEN.LESS_EQUAL else TOKEN.LESS,scanner),
+        '>' => return makeToken(if( match(scanner,'=')) TOKEN.GREATER_EQUAL else TOKEN.GREATER,scanner),
+        '"' => return string(scanner),
+        '0'...'9' => return number(scanner),
         else => {
             var msg = "Unexpected character.";
             return errorToken( msg[0..], scanner.line);
@@ -483,9 +589,10 @@ fn compile( source:String) void {
         } else {
             warn( "   | ");
         }
-        warn("{} {} \n", (u6) (token.ttype), token.start);
+        warn( "{}", @tagName(token.tokenType));
+        warn(" {} \n", (token.start)); // TBD: How do I print a slice?
 
-        if( token.ttype == TokenType.EOF) break;
+        if( token.tokenType == TOKEN.EOF) break;
 
     }
 
@@ -574,9 +681,9 @@ pub fn main( ) !void {
     var chunk = initChunk();
     defer freeChunk(&chunk);
 
-    // {
-    //    .code = ArrayList([] const u8).init(ALLOCATOR)
-    //};
+}
+
+fn deadCode() void {
     assert(chunk.code.len == 0);
     var valueOffset = try addConstant(&chunk, 1.2);
     
@@ -601,5 +708,6 @@ pub fn main( ) !void {
     try disassembleChunk( &chunk, "test chunk");
     warn("== Interpret\n");
     try interpret( &chunk);
+
 }
 
