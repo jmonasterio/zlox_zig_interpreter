@@ -42,6 +42,8 @@ const STACK_MAX = 256;
 
 const ALLOCATOR = debug.global_allocator;
 
+//const SLICEU8 = &const[]u8;
+
 const ZloxError = error {
     OutOfRange,
     OutOfMemory,
@@ -52,14 +54,14 @@ const ZloxError = error {
 inline fn printValue( value: var) !void {
    var buf: [100]u8 = undefined;
    var result = ([] const u8) (try fmt.bufPrint(buf[0..], "{}", value));
-   //warn(result);
+   warn("{}",result);
    return;
 }
 
 inline fn printFormattedValue( format: []u8, value: var) !void {
    var buf: [100]u8 = undefined;
    const result = try bufPrint(buf[0..], format, value);
-   warn(result);
+   warn("{}",result);
    return;
 }
 
@@ -365,7 +367,7 @@ const Scanner = struct {
 
 fn initScanner( source:String) Scanner {
     return Scanner{
-        .source = source,
+        .source = source, // slice
         .start = 0,
         .len = 0,
         .current = 0,
@@ -401,18 +403,19 @@ const TOKEN = enum {
 
 const Token = struct {
     tokenType: TOKEN,
-    start: &[]u8, // TBD: Slice from original source.
-    //length: usize;
+    start: Offset, // TBD: Slice from original source.
+    end: Offset,
     line: LineNumber,
+    message: string,
 };
 
 fn makeToken( tokenType: TOKEN, scanner:&Scanner) Token {
-    var lexemeSlice = scanner.source[scanner.start..scanner.current];
     return Token{
         .tokenType = tokenType,
-        .start = &lexemeSlice,
+        .start = scanner.start,
+        .end = scanner.current,
         .line = scanner.line,
-
+        .message = "",
     };
 }
 
@@ -420,17 +423,20 @@ fn eofToken( line:LineNumber) Token {
     var eof = "EOF";
     return Token{
         .tokenType = TOKEN.EOF,
-        .start = &eof[0..],
+        .message = eof,
         .line = line,
-
+        .start = 0,
+        .end = 0,
     };
 }
 
-fn errorToken( message: String, line:LineNumber) Token {
+fn errorToken( message:  String, line:LineNumber) Token {
     return Token{
         .tokenType = TOKEN.ERROR,
-        .start = &message[0..],
+        .message = message,
         .line = line,
+        .start = 0,
+        .end = 0,
 
     };
 }
@@ -590,7 +596,7 @@ fn compile( source:String) void {
             warn( "   | ");
         }
         warn( "{}", @tagName(token.tokenType));
-        warn(" {} \n", (token.start)); // TBD: How do I print a slice?
+        warn(" {} \n", scanner.source[token.start..token.end]); // TBD: How do I print a slice?
 
         if( token.tokenType == TOKEN.EOF) break;
 
